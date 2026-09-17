@@ -829,8 +829,8 @@ async function createPkce() {
 connectDerivBtn.addEventListener("click", async () => {
   const { code_verifier, code_challenge } = await createPkce();
   const state = base64UrlEncode(crypto.getRandomValues(new Uint8Array(16)));
-  sessionStorage.setItem("bluefx_code_verifier", code_verifier);
-  sessionStorage.setItem("bluefx_oauth_state", state);
+  localStorage.setItem("bluefx_code_verifier", code_verifier);
+  localStorage.setItem("bluefx_oauth_state", state);
 
   const redirectUri = window.location.origin + "/callback";
   const authUrl = "https://auth.deriv.com/oauth2/auth?" + new URLSearchParams({

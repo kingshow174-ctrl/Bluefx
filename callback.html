@@ -23,8 +23,8 @@
     return;
   }
 
-  const storedState = sessionStorage.getItem("bluefx_oauth_state");
-  const codeVerifier = sessionStorage.getItem("bluefx_code_verifier");
+  const storedState = localStorage.getItem("bluefx_oauth_state");
+  const codeVerifier = localStorage.getItem("bluefx_code_verifier");
 
   if (!code || !state || state !== storedState || !codeVerifier) {
     msgEl.textContent = "Login response didn't match — possible expired session. (code=" + !!code + ", state match=" + (state === storedState) + ", verifier=" + !!codeVerifier + ")";
@@ -72,8 +72,8 @@
       const accounts = Array.isArray(acctData.data) ? acctData.data : [acctData.data];
       localStorage.setItem("bluefx_deriv_accounts", JSON.stringify(accounts));
       msgEl.textContent = "Connected! Redirecting...";
-      sessionStorage.removeItem("bluefx_oauth_state");
-      sessionStorage.removeItem("bluefx_code_verifier");
+      localStorage.removeItem("bluefx_oauth_state");
+      localStorage.removeItem("bluefx_code_verifier");
       setTimeout(() => { window.location.href = "/"; }, 1000);
     } else {
       msgEl.textContent = "Logged in, but couldn't list accounts: " + JSON.stringify(acctData);
