@@ -694,3 +694,96 @@ document.getElementById("logoutBtn").addEventListener("click", () => {
   accountBalance.textContent = "Not connected";
   log("Logged out (placeholder — no real session was active).");
 });
+
+// =========================================================
+// DERIV OAUTH LOGIN — real account linking.
+// This only handles login + connecting the authenticated
+// WebSocket for now. It does NOT place trades — that needs
+// the buy/sell message spec for this API, which isn't
+// documented yet. Test with the Demo account first.
+// =========================================================
+const DERIV_APP_ID = "34qkHBWs65EnHfTnuEESd";
+const connectDerivBtn = document.getElementById("connectDerivBtn");
+let derivAccounts = []; // [{account, token, currency}]
+let selectedDerivAccount = null;
+let authWs = null;
+
+connectDerivBtn.addEventListener("click", () => {
+  window.location.href = `https://oauth.deriv.com/oauth2/authorize?app_id=${DERIV_APP_ID}`;
+});
+
+function loadStoredDerivAccounts() {
+  const raw = localStorage.getItem("bluefx_deriv_accounts");
+  if (!raw) return;
+  try {
+    derivAccounts = JSON.parse(raw);
+    log(`Loaded ${derivAccounts.length} linked Deriv account(s) from login.`);
+    renderDerivAccounts();
+  } catch (e) {
+    log("Could not parse stored Deriv accounts: " + e.message);
+  }
+}
+
+function renderDerivAccounts() {
+  if (derivAccounts.length === 0) return;
+  connectDerivBtn.style.display = "none";
+
+  // Heuristic only: Deriv typically prefixes demo accounts with "VRTC" and
+  // real accounts with "CR" (or MF/MLT/MX for some EU real accounts) — this
+  // isn't guaranteed for every account type, so double-check manually.
+  const demo = derivAccounts.find(a => a.account.toUpperCase().startsWith("VR"));
+  const real = derivAccounts.find(a => !a.account.toUpperCase().startsWith("VR"));
+
+  demoAccBtn.onclick = () => selectDerivAccount(demo, "demo");
+  realAccBtn.onclick = () => selectDerivAccount(real, "real");
+
+  // Default to demo on first connect, for safety
+  if (demo) selectDerivAccount(demo, "demo");
+  else if (real) selectDerivAccount(real, "real");
+}
+
+function selectDerivAccount(acc, type) {
+  if (!acc) {
+    log(`No ${type} account found among linked accounts.`);
+    accountBalance.textContent = `No ${type} account linked`;
+    return;
+  }
+  selectedDerivAccount = acc;
+  selectedAccountType = type;
+  demoAccBtn.classList.toggle("active", type === "demo");
+  realAccBtn.classList.toggle("active", type === "real");
+  accountBalance.textContent = `${acc.account} (${acc.currency})`;
+  log(`Selected ${type} account: ${acc.account}`);
+  connectAuthenticatedFeed(acc);
+}
+
+async function connectAuthenticatedFeed(acc) {
+  log(`Requesting OTP for account ${acc.account}...`);
+  try {
+    const res = await fetch(
+      `https://api.derivws.com/trading/v1/options/accounts/${acc.account}/otp`,
+      { method: "POST", headers: { "Authorization": `Bearer ${acc.token}` } }
+    );
+    const body = await res.json();
+    if (!res.ok || !body.data || !body.data.url) {
+      log(`OTP request failed for ${acc.account}: ${JSON.stringify(body)}`);
+      return;
+    }
+    if (authWs) { try { authWs.close(); } catch (e) {} }
+    authWs = new WebSocket(body.data.url);
+    authWs.onopen = () => log(`Authenticated WebSocket connected for ${acc.account}.`);
+    authWs.onmessage = (event) => {
+      let msg;
+      try { msg = JSON.parse(event.data); } catch (e) { return; }
+      console.log("AUTH_RAW:", msg);
+      log(`[auth feed] message received — see console (AUTH_RAW) for details.`);
+    };
+    authWs.onerror = (err) => { log("Authenticated WebSocket error — see console."); console.error(err); };
+    authWs.onclose = (event) => log(`Authenticated WebSocket closed (code=${event.code}, reason="${event.reason || "none"}").`);
+  } catch (e) {
+    log(`OTP request error: ${e.message}`);
+  }
+}
+
+// Check for a just-completed login on every page load
+loadStoredDerivAccounts();

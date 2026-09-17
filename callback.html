@@ -1,0 +1,42 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="UTF-8">
+<title>Blue FX — Connecting...</title>
+<style>
+  body { background:#0a0e17; color:#e6e9f0; font-family:sans-serif; display:flex; align-items:center; justify-content:center; height:100vh; margin:0; }
+</style>
+</head>
+<body>
+<div id="msg">Connecting your Deriv account...</div>
+<script>
+  // Deriv's docs show this coming back as either query params or a #hash
+  // fragment depending on flow version — check both to be safe.
+  function extractAccounts(paramString) {
+    const params = new URLSearchParams(paramString);
+    const accounts = [];
+    let i = 1;
+    while (params.has('acct' + i)) {
+      accounts.push({
+        account: params.get('acct' + i),
+        token: params.get('token' + i),
+        currency: params.get('cur' + i),
+      });
+      i++;
+    }
+    return accounts;
+  }
+
+  let accounts = extractAccounts(window.location.search.slice(1));
+  if (accounts.length === 0) accounts = extractAccounts(window.location.hash.slice(1));
+
+  if (accounts.length > 0) {
+    localStorage.setItem('bluefx_deriv_accounts', JSON.stringify(accounts));
+    document.getElementById('msg').textContent = 'Connected! Redirecting...';
+  } else {
+    document.getElementById('msg').textContent = 'No account tokens found in the response. Redirecting back...';
+  }
+  setTimeout(() => { window.location.href = '/'; }, 1200);
+</script>
+</body>
+</html>
