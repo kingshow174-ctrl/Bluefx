@@ -696,28 +696,61 @@ document.getElementById("logoutBtn").addEventListener("click", () => {
 });
 
 // =========================================================
-// DERIV OAUTH LOGIN — real account linking.
-// This only handles login + connecting the authenticated
-// WebSocket for now. It does NOT place trades — that needs
-// the buy/sell message spec for this API, which isn't
-// documented yet. Test with the Demo account first.
+// DERIV OAUTH LOGIN — Authorization Code + PKCE flow.
+// The code-for-token exchange happens on our own backend
+// (/api/exchange-code in server.js), per Deriv's requirement
+// that this never happen in the browser.
+// Rise/Fall still do NOT place real trades — that needs the
+// buy/sell message spec, which isn't wired up yet.
 // =========================================================
 const DERIV_APP_ID = "34qkHBWs65EnHfTnuEESd";
 const connectDerivBtn = document.getElementById("connectDerivBtn");
-let derivAccounts = []; // [{account, token, currency}]
+let derivAccessToken = null;
+let derivAccounts = []; // [{account_id, balance, currency, account_type, ...}]
 let selectedDerivAccount = null;
 let authWs = null;
 
-connectDerivBtn.addEventListener("click", () => {
-  window.location.href = `https://oauth.deriv.com/oauth2/authorize?app_id=${DERIV_APP_ID}`;
+function base64UrlEncode(buffer) {
+  return btoa(String.fromCharCode(...new Uint8Array(buffer)))
+    .replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "");
+}
+
+async function createPkce() {
+  const verifierBytes = crypto.getRandomValues(new Uint8Array(32));
+  const code_verifier = base64UrlEncode(verifierBytes);
+  const digest = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(code_verifier));
+  const code_challenge = base64UrlEncode(digest);
+  return { code_verifier, code_challenge };
+}
+
+connectDerivBtn.addEventListener("click", async () => {
+  const { code_verifier, code_challenge } = await createPkce();
+  const state = base64UrlEncode(crypto.getRandomValues(new Uint8Array(16)));
+  sessionStorage.setItem("bluefx_code_verifier", code_verifier);
+  sessionStorage.setItem("bluefx_oauth_state", state);
+
+  const redirectUri = window.location.origin + "/callback";
+  const authUrl = "https://auth.deriv.com/oauth2/auth?" + new URLSearchParams({
+    response_type: "code",
+    client_id: DERIV_APP_ID,
+    redirect_uri: redirectUri,
+    scope: "trade account_manage",
+    state: state,
+    code_challenge: code_challenge,
+    code_challenge_method: "S256",
+  }).toString();
+
+  window.location.href = authUrl;
 });
 
 function loadStoredDerivAccounts() {
+  const token = localStorage.getItem("bluefx_access_token");
   const raw = localStorage.getItem("bluefx_deriv_accounts");
-  if (!raw) return;
+  if (!token || !raw) return;
+  derivAccessToken = token;
   try {
     derivAccounts = JSON.parse(raw);
-    log(`Loaded ${derivAccounts.length} linked Deriv account(s) from login.`);
+    log(`Loaded ${derivAccounts.length} Deriv account(s).`);
     renderDerivAccounts();
   } catch (e) {
     log("Could not parse stored Deriv accounts: " + e.message);
@@ -728,17 +761,13 @@ function renderDerivAccounts() {
   if (derivAccounts.length === 0) return;
   connectDerivBtn.style.display = "none";
 
-  // Heuristic only: Deriv typically prefixes demo accounts with "VRTC" and
-  // real accounts with "CR" (or MF/MLT/MX for some EU real accounts) — this
-  // isn't guaranteed for every account type, so double-check manually.
-  const demo = derivAccounts.find(a => a.account.toUpperCase().startsWith("VR"));
-  const real = derivAccounts.find(a => !a.account.toUpperCase().startsWith("VR"));
+  const demo = derivAccounts.find(a => (a.account_type || "").toLowerCase() === "demo");
+  const real = derivAccounts.find(a => (a.account_type || "").toLowerCase() !== "demo");
 
   demoAccBtn.onclick = () => selectDerivAccount(demo, "demo");
   realAccBtn.onclick = () => selectDerivAccount(real, "real");
 
-  // Default to demo on first connect, for safety
-  if (demo) selectDerivAccount(demo, "demo");
+  if (demo) selectDerivAccount(demo, "demo"); // default to demo for safety
   else if (real) selectDerivAccount(real, "real");
 }
 
@@ -752,26 +781,26 @@ function selectDerivAccount(acc, type) {
   selectedAccountType = type;
   demoAccBtn.classList.toggle("active", type === "demo");
   realAccBtn.classList.toggle("active", type === "real");
-  accountBalance.textContent = `${acc.account} (${acc.currency})`;
-  log(`Selected ${type} account: ${acc.account}`);
+  accountBalance.textContent = `${acc.account_id} — ${acc.balance} ${acc.currency}`;
+  log(`Selected ${type} account: ${acc.account_id}`);
   connectAuthenticatedFeed(acc);
 }
 
 async function connectAuthenticatedFeed(acc) {
-  log(`Requesting OTP for account ${acc.account}...`);
+  log(`Requesting OTP for account ${acc.account_id}...`);
   try {
     const res = await fetch(
-      `https://api.derivws.com/trading/v1/options/accounts/${acc.account}/otp`,
-      { method: "POST", headers: { "Authorization": `Bearer ${acc.token}` } }
+      `https://api.derivws.com/trading/v1/options/accounts/${acc.account_id}/otp`,
+      { method: "POST", headers: { "Authorization": `Bearer ${derivAccessToken}` } }
     );
     const body = await res.json();
     if (!res.ok || !body.data || !body.data.url) {
-      log(`OTP request failed for ${acc.account}: ${JSON.stringify(body)}`);
+      log(`OTP request failed for ${acc.account_id}: ${JSON.stringify(body)}`);
       return;
     }
     if (authWs) { try { authWs.close(); } catch (e) {} }
     authWs = new WebSocket(body.data.url);
-    authWs.onopen = () => log(`Authenticated WebSocket connected for ${acc.account}.`);
+    authWs.onopen = () => log(`Authenticated WebSocket connected for ${acc.account_id}.`);
     authWs.onmessage = (event) => {
       let msg;
       try { msg = JSON.parse(event.data); } catch (e) { return; }
@@ -785,5 +814,4 @@ async function connectAuthenticatedFeed(acc) {
   }
 }
 
-// Check for a just-completed login on every page load
 loadStoredDerivAccounts();

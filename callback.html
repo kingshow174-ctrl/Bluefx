@@ -4,39 +4,76 @@
 <meta charset="UTF-8">
 <title>Blue FX — Connecting...</title>
 <style>
-  body { background:#0a0e17; color:#e6e9f0; font-family:sans-serif; display:flex; align-items:center; justify-content:center; height:100vh; margin:0; }
+  body { background:#0a0e17; color:#e6e9f0; font-family:sans-serif; display:flex; align-items:center; justify-content:center; height:100vh; margin:0; padding:20px; text-align:center; }
 </style>
 </head>
 <body>
 <div id="msg">Connecting your Deriv account...</div>
 <script>
-  // Deriv's docs show this coming back as either query params or a #hash
-  // fragment depending on flow version — check both to be safe.
-  function extractAccounts(paramString) {
-    const params = new URLSearchParams(paramString);
-    const accounts = [];
-    let i = 1;
-    while (params.has('acct' + i)) {
-      accounts.push({
-        account: params.get('acct' + i),
-        token: params.get('token' + i),
-        currency: params.get('cur' + i),
-      });
-      i++;
+(async function () {
+  const params = new URLSearchParams(window.location.search);
+  const code = params.get("code");
+  const state = params.get("state");
+  const error = params.get("error");
+  const msgEl = document.getElementById("msg");
+
+  if (error) {
+    msgEl.textContent = "Login was cancelled or denied. Redirecting back...";
+    setTimeout(() => { window.location.href = "/"; }, 1500);
+    return;
+  }
+
+  const storedState = sessionStorage.getItem("bluefx_oauth_state");
+  const codeVerifier = sessionStorage.getItem("bluefx_code_verifier");
+
+  if (!code || !state || state !== storedState || !codeVerifier) {
+    msgEl.textContent = "Login response didn't match — possible expired session. Redirecting back...";
+    setTimeout(() => { window.location.href = "/"; }, 1500);
+    return;
+  }
+
+  try {
+    const res = await fetch("/api/exchange-code", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        code,
+        code_verifier: codeVerifier,
+        redirect_uri: window.location.origin + "/callback",
+      }),
+    });
+    const tokenData = await res.json();
+    if (!res.ok || !tokenData.access_token) {
+      msgEl.textContent = "Token exchange failed: " + JSON.stringify(tokenData);
+      console.error("Token exchange failed:", tokenData);
+      return;
     }
-    return accounts;
-  }
 
-  let accounts = extractAccounts(window.location.search.slice(1));
-  if (accounts.length === 0) accounts = extractAccounts(window.location.hash.slice(1));
+    localStorage.setItem("bluefx_access_token", tokenData.access_token);
+    msgEl.textContent = "Fetching your accounts...";
 
-  if (accounts.length > 0) {
-    localStorage.setItem('bluefx_deriv_accounts', JSON.stringify(accounts));
-    document.getElementById('msg').textContent = 'Connected! Redirecting...';
-  } else {
-    document.getElementById('msg').textContent = 'No account tokens found in the response. Redirecting back...';
+    const acctRes = await fetch("https://api.derivws.com/trading/v1/options/accounts", {
+      headers: { "Authorization": "Bearer " + tokenData.access_token },
+    });
+    const acctData = await acctRes.json();
+    console.log("Accounts response:", acctData);
+
+    if (acctRes.ok && acctData.data) {
+      const accounts = Array.isArray(acctData.data) ? acctData.data : [acctData.data];
+      localStorage.setItem("bluefx_deriv_accounts", JSON.stringify(accounts));
+      msgEl.textContent = "Connected! Redirecting...";
+    } else {
+      msgEl.textContent = "Logged in, but couldn't list accounts — see console.";
+    }
+  } catch (e) {
+    msgEl.textContent = "Error during login: " + e.message;
+    console.error(e);
+  } finally {
+    sessionStorage.removeItem("bluefx_oauth_state");
+    sessionStorage.removeItem("bluefx_code_verifier");
+    setTimeout(() => { window.location.href = "/"; }, 1200);
   }
-  setTimeout(() => { window.location.href = '/'; }, 1200);
+})();
 </script>
 </body>
 </html>
