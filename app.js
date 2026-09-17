@@ -607,10 +607,11 @@ granSel.addEventListener("change", (e) => {
 connect();
 
 // =========================================================
-// TRADE UI — placeholders only. No real orders are sent yet;
-// this needs the authenticated OTP WebSocket (see the /otp
-// endpoint from earlier) before "Rise"/"Fall" can place a
-// real trade. Wire that in when you're ready to connect.
+// TRADE UI — real proposal -> buy flow over the authenticated
+// WebSocket. Contract type mapping (PUT=Rise, CALL=Fall) is
+// taken directly from Deriv's own documented Rise/Fall guide
+// for this API and is counterintuitive — verify with a small
+// Demo trade before trusting it on Real money.
 // =========================================================
 const riseBtn = document.getElementById("riseBtn");
 const fallBtn = document.getElementById("fallBtn");
@@ -618,33 +619,135 @@ const accountBlock = document.getElementById("account-block");
 const demoAccBtn = document.getElementById("demoAccBtn");
 const realAccBtn = document.getElementById("realAccBtn");
 const accountBalance = document.getElementById("account-balance");
+const durationTypeSelect = document.getElementById("durationTypeSelect");
+const durationValueInput = document.getElementById("durationValueInput");
+const stakeInput = document.getElementById("stakeInput");
 
-let selectedAccountType = "demo"; // "demo" | "real" — not yet wired to a real account
+let selectedAccountType = "demo"; // "demo" | "real"
+let tradeReqCounter = 1;
+const pendingTradeRequests = {}; // req_id -> {resolve, reject}
 
-riseBtn.addEventListener("click", () => {
-  log(`[placeholder] Rise tapped on ${currentSymbol} (${selectedAccountType} account) — not connected to trading yet.`);
-});
+function updateBalanceDisplay() {
+  const demo = derivAccounts.find(a => (a.account_type || "").toLowerCase() === "demo");
+  const real = derivAccounts.find(a => (a.account_type || "").toLowerCase() !== "demo");
+  const demoText = demo ? `Demo: ${demo.balance} ${demo.currency}` : "Demo: —";
+  const realText = real ? `Real: ${real.balance} ${real.currency}` : "Real: —";
+  accountBalance.textContent = `${demoText}   |   ${realText}`;
+}
 
-fallBtn.addEventListener("click", () => {
-  log(`[placeholder] Fall tapped on ${currentSymbol} (${selectedAccountType} account) — not connected to trading yet.`);
-});
+// Correlate proposal/buy responses on the authenticated socket by req_id.
+// This taps into authWs.onmessage in addition to the logging handler
+// already set up in connectAuthenticatedFeed.
+function sendAuthRequest(payload) {
+  return new Promise((resolve, reject) => {
+    if (!authWs || authWs.readyState !== WebSocket.OPEN) {
+      reject(new Error("Not connected to the authenticated feed yet."));
+      return;
+    }
+    const reqId = tradeReqCounter++;
+    payload.req_id = reqId;
+    pendingTradeRequests[reqId] = { resolve, reject };
+    authWs.send(JSON.stringify(payload));
+    setTimeout(() => {
+      if (pendingTradeRequests[reqId]) {
+        delete pendingTradeRequests[reqId];
+        reject(new Error("Request timed out waiting for a response."));
+      }
+    }, 10000);
+  });
+}
+
+// Wrap the existing authWs.onmessage handler (set in connectAuthenticatedFeed)
+// so trade responses also get routed to any pending promise by req_id.
+function attachTradeResponseRouting(ws) {
+  const originalOnMessage = ws.onmessage;
+  ws.onmessage = (event) => {
+    if (originalOnMessage) originalOnMessage(event);
+    let msg;
+    try { msg = JSON.parse(event.data); } catch (e) { return; }
+    if (msg.req_id && pendingTradeRequests[msg.req_id]) {
+      const { resolve, reject } = pendingTradeRequests[msg.req_id];
+      delete pendingTradeRequests[msg.req_id];
+      if (msg.error) reject(new Error(msg.error.message || JSON.stringify(msg.error)));
+      else resolve(msg);
+    }
+  };
+}
+
+async function placeTrade(direction) {
+  if (!selectedDerivAccount || !authWs || authWs.readyState !== WebSocket.OPEN) {
+    log("Cannot trade: not connected to an authenticated account yet. Tap Login first.");
+    return;
+  }
+  const stake = parseFloat(stakeInput.value);
+  const durationValue = parseInt(durationValueInput.value, 10);
+  const durationUnit = durationTypeSelect.value; // 't' | 'm' | 'h'
+  if (!stake || stake <= 0 || !durationValue || durationValue <= 0) {
+    log("Enter a valid stake and duration before trading.");
+    return;
+  }
+
+  // Per Deriv's documented Rise/Fall mapping for this API: Rise -> PUT, Fall -> CALL.
+  const contractType = direction === "rise" ? "PUT" : "CALL";
+
+  log(`Requesting ${direction} proposal: ${currentSymbol}, stake ${stake} ${selectedDerivAccount.currency}, ${durationValue}${durationUnit}...`);
+
+  try {
+    const proposalMsg = await sendAuthRequest({
+      proposal: 1,
+      amount: stake,
+      basis: "stake",
+      contract_type: contractType,
+      currency: selectedDerivAccount.currency,
+      duration: durationValue,
+      duration_unit: durationUnit,
+      underlying_symbol: currentSymbol,
+    });
+
+    const proposal = proposalMsg.proposal;
+    if (!proposal || !proposal.id) {
+      log("Proposal response missing an id — see console for the raw message.");
+      console.log("PROPOSAL_RAW:", proposalMsg);
+      return;
+    }
+    log(`Proposal received: ask price ${proposal.ask_price}. Buying...`);
+
+    const buyMsg = await sendAuthRequest({
+      buy: proposal.id,
+      price: proposal.ask_price,
+    });
+
+    const buy = buyMsg.buy;
+    if (!buy) {
+      log("Buy response missing expected data — see console.");
+      console.log("BUY_RAW:", buyMsg);
+      return;
+    }
+
+    log(`Trade placed. Contract ${buy.contract_id}, price ${buy.buy_price}, new balance ${buy.balance_after}.`);
+
+    // Update the balance for whichever account we just traded on, from the
+    // server's authoritative figure — not a client-side guess.
+    selectedDerivAccount.balance = buy.balance_after;
+    updateBalanceDisplay();
+  } catch (e) {
+    log(`Trade failed: ${e.message}`);
+  }
+}
+
+riseBtn.addEventListener("click", () => placeTrade("rise"));
+fallBtn.addEventListener("click", () => placeTrade("fall"));
 
 demoAccBtn.addEventListener("click", () => {
-  selectedAccountType = "demo";
-  demoAccBtn.classList.add("active");
-  realAccBtn.classList.remove("active");
-  log("Switched to Demo account (placeholder — not yet linked to a real account).");
+  if (derivAccounts.length === 0) {
+    log("Log in first to switch between Demo and Real.");
+  }
 });
-
 realAccBtn.addEventListener("click", () => {
-  selectedAccountType = "real";
-  realAccBtn.classList.add("active");
-  demoAccBtn.classList.remove("active");
-  log("Switched to Real account (placeholder — not yet linked to a real account).");
+  if (derivAccounts.length === 0) {
+    log("Log in first to switch between Demo and Real.");
+  }
 });
-
-// To reveal the account block later once auth is wired up, run in console:
-//   document.getElementById("account-block").classList.add("visible");
 
 // =========================================================
 // TABS — Chart / Signals / Settings
@@ -781,7 +884,7 @@ function selectDerivAccount(acc, type) {
   selectedAccountType = type;
   demoAccBtn.classList.toggle("active", type === "demo");
   realAccBtn.classList.toggle("active", type === "real");
-  accountBalance.textContent = `${acc.account_id} — ${acc.balance} ${acc.currency}`;
+  updateBalanceDisplay();
   log(`Selected ${type} account: ${acc.account_id}`);
   connectAuthenticatedFeed(acc);
 }
@@ -809,6 +912,7 @@ async function connectAuthenticatedFeed(acc) {
     };
     authWs.onerror = (err) => { log("Authenticated WebSocket error — see console."); console.error(err); };
     authWs.onclose = (event) => log(`Authenticated WebSocket closed (code=${event.code}, reason="${event.reason || "none"}").`);
+    attachTradeResponseRouting(authWs);
   } catch (e) {
     log(`OTP request error: ${e.message}`);
   }

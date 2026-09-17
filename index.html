@@ -58,8 +58,12 @@
   #jump-latest-btn { display: none; position: absolute; bottom: 36px; right: 74px; z-index: 4; font-size: 12px; padding: 6px 10px; background: var(--blue-dim); }
   #jump-latest-btn.show { display: block; }
 
-  #trade-panel { display: flex; gap: 10px; padding: 12px 16px; background: var(--panel); border-top: 1px solid var(--border); }
-  .trade-btn { flex: 1; padding: 16px; font-size: 16px; font-weight: 700; border-radius: 10px; border: none; letter-spacing: 0.5px; }
+  #trade-panel { display: flex; flex-direction: column; padding-top: 12px; background: var(--panel); border-top: 1px solid var(--border); }
+  .trade-params { display: flex; gap: 8px; padding: 0 16px 10px; }
+  .trade-params select, .trade-params input { flex: 1; min-width: 0; }
+  .trade-buttons { display: flex; gap: 10px; padding: 0 16px 12px; }
+
+  .trade-btn { flex: 1; padding: 14px; font-size: 16px; font-weight: 700; border-radius: 10px; border: none; letter-spacing: 0.5px; }
   .trade-btn.rise { background: var(--green); color: #04120f; }
   .trade-btn.fall { background: var(--red); color: #2a0505; }
   .trade-btn:active { opacity: 0.8; }
@@ -94,7 +98,7 @@
       <button id="realAccBtn">Real</button>
     </div>
     <span id="account-balance">Not connected</span>
-    <button id="connectDerivBtn">Connect Deriv</button>
+    <button id="connectDerivBtn">Login</button>
   </div>
 </header>
 
@@ -145,8 +149,19 @@
   </div>
 
   <div id="trade-panel">
-    <button class="trade-btn rise" id="riseBtn">▲ Rise</button>
-    <button class="trade-btn fall" id="fallBtn">▼ Fall</button>
+    <div class="trade-params">
+      <select id="durationTypeSelect">
+        <option value="t">Ticks</option>
+        <option value="m" selected>Minutes</option>
+        <option value="h">Hours</option>
+      </select>
+      <input type="number" id="durationValueInput" value="5" min="1">
+      <input type="number" id="stakeInput" value="1" min="0.35" step="0.01" placeholder="Stake">
+    </div>
+    <div class="trade-buttons">
+      <button class="trade-btn rise" id="riseBtn">▲ Rise</button>
+      <button class="trade-btn fall" id="fallBtn">▼ Fall</button>
+    </div>
   </div>
 
   <div id="log"></div>
@@ -185,6 +200,6 @@
   </div>
 </div>
 
-<script src="app.js?v=8"></script>
+<script src="app.js?v=9"></script>
 </body>
 </html>
