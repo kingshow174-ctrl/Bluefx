@@ -458,7 +458,19 @@ function draw() {
   const containerW = chartArea.clientWidth;
   const padTop = 16, padBottom = 28;
   const plotW = candles.length * candlePx;
-  const totalW = plotW + RIGHT_GUTTER; // empty space so the live candle isn't hidden behind the axis
+  const baseTime = candles[0].time;
+  const pxPerSec = candlePx / granularity;
+  const xForTime = (t) => (t - baseTime) / granularity * candlePx;
+
+  // Extend the canvas if any active trade's expiry falls beyond the loaded candles
+  let extraForTrades = 0;
+  activeTrades.forEach(tr => {
+    if (tr.expiryTime) {
+      const need = xForTime(tr.expiryTime) - plotW;
+      if (need > extraForTrades) extraForTrades = need;
+    }
+  });
+  const totalW = plotW + RIGHT_GUTTER + Math.max(0, extraForTrades);
 
   canvas.width = totalW * devicePixelRatio;
   canvas.height = containerH * devicePixelRatio;
@@ -542,6 +554,7 @@ function draw() {
 
   drawEmaLine(ema20Full, yToPx, "#f5c542");
   drawEmaLine(ema50Full, yToPx, "#e05fd0");
+  drawTradeMarkers(xForTime, yToPx, containerH);
 
   const lastClose = candles[candles.length - 1].close;
   const yLast = yToPx(lastClose);
@@ -730,6 +743,22 @@ async function placeTrade(direction) {
     // server's authoritative figure — not a client-side guess.
     selectedDerivAccount.balance = buy.balance_after;
     updateBalanceDisplay();
+
+    // Record entry/expiry for the chart marker. Expiry is only an exact
+    // time for s/m/h/d durations — tick-based contracts expire after N
+    // ticks, not a fixed clock time, so we can't draw an exact line for those.
+    const entryTime = Number(buy.start_time) || Math.floor(Date.now() / 1000);
+    const unitSeconds = { s: 1, m: 60, h: 3600, d: 86400, t: null }[durationUnit];
+    activeTrades.push({
+      direction,
+      entryTime,
+      entryPrice: proposal.spot != null ? Number(proposal.spot) : null,
+      durationValue,
+      durationUnit,
+      expiryTime: unitSeconds ? entryTime + durationValue * unitSeconds : null,
+      contractId: buy.contract_id,
+    });
+    draw();
   } catch (e) {
     log(`Trade failed: ${e.message}`);
   }
@@ -920,3 +949,64 @@ async function connectAuthenticatedFeed(acc) {
 }
 
 loadStoredDerivAccounts();
+
+// =========================================================
+// TRADE MARKERS — entry/expiry lines drawn on the chart.
+// Expiry lines only appear for s/m/h/d durations; tick-based
+// trades show an approximate "~N ticks" label instead, since
+// their actual expiry time isn't fixed in advance.
+// =========================================================
+let activeTrades = [];
+
+function pruneExpiredTrades() {
+  const now = Math.floor(Date.now() / 1000);
+  activeTrades = activeTrades.filter(tr => !tr.expiryTime || now < tr.expiryTime + 10);
+}
+
+function drawTradeMarkers(xForTime, yToPx, containerH) {
+  pruneExpiredTrades();
+  activeTrades.forEach(tr => {
+    const color = tr.direction === "rise" ? "#26a69a" : "#ef5350";
+    const xEntry = xForTime(tr.entryTime);
+
+    // Entry line
+    ctx.strokeStyle = color;
+    ctx.setLineDash([3, 3]);
+    ctx.lineWidth = 1.5;
+    ctx.beginPath();
+    ctx.moveTo(xEntry, 0);
+    ctx.lineTo(xEntry, containerH);
+    ctx.stroke();
+    ctx.setLineDash([]);
+
+    ctx.fillStyle = color;
+    ctx.font = "10px monospace";
+    ctx.fillText((tr.direction === "rise" ? "▲ ENTRY" : "▼ ENTRY"), xEntry + 4, 14);
+
+    // Entry price dot, if we have it
+    if (tr.entryPrice != null) {
+      const yEntry = yToPx(tr.entryPrice);
+      ctx.beginPath();
+      ctx.arc(xEntry, yEntry, 3, 0, Math.PI * 2);
+      ctx.fill();
+    }
+
+    if (tr.expiryTime) {
+      const xExpiry = xForTime(tr.expiryTime);
+      ctx.strokeStyle = "#e6e9f0";
+      ctx.setLineDash([2, 4]);
+      ctx.lineWidth = 1;
+      ctx.beginPath();
+      ctx.moveTo(xExpiry, 0);
+      ctx.lineTo(xExpiry, containerH);
+      ctx.stroke();
+      ctx.setLineDash([]);
+      ctx.fillStyle = "#e6e9f0";
+      ctx.fillText("EXPIRY", xExpiry + 4, 28);
+    } else {
+      // Tick-based contract: no fixed time, so just label near entry
+      ctx.fillStyle = "#7a8296";
+      ctx.fillText(`~${tr.durationValue} ticks`, xEntry + 4, 28);
+    }
+  });
+}
