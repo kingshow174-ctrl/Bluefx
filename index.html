@@ -1,0 +1,189 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Blue FX</title>
+<style>
+  :root {
+    --bg: #0a0e17; --panel: #121826; --border: #1e2636;
+    --blue: #2f6bff; --blue-dim: #1a3a7a;
+    --green: #26a69a; --red: #ef5350;
+    --text: #e6e9f0; --text-dim: #7a8296;
+    --ema20: #f5c542; --ema50: #e05fd0;
+  }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body { background: var(--bg); color: var(--text); font-family: -apple-system, Segoe UI, Roboto, sans-serif; height: 100vh; display: flex; flex-direction: column; }
+  header { display: flex; align-items: center; justify-content: space-between; padding: 12px 16px; background: var(--panel); border-bottom: 1px solid var(--border); gap: 10px; }
+  .logo { display: flex; align-items: center; gap: 8px; font-weight: 700; font-size: 18px; }
+  .logo span { color: var(--blue); }
+  #status-dot { width: 9px; height: 9px; border-radius: 50%; background: var(--red); flex-shrink: 0; }
+  #status-dot.connected { background: var(--green); }
+  #status-dot.connecting { background: #d9a441; }
+
+  #account-block { display: flex; align-items: center; gap: 10px; font-size: 12px; }
+  .account-toggle { display: flex; background: #182033; border: 1px solid var(--border); border-radius: 8px; overflow: hidden; }
+  .account-toggle button { border: none; border-radius: 0; padding: 6px 12px; background: transparent; color: var(--text-dim); font-size: 12px; }
+  .account-toggle button.active { background: var(--blue-dim); color: var(--text); }
+  #account-balance { color: var(--text-dim); }
+
+  #tab-bar { display: flex; background: var(--panel); border-bottom: 1px solid var(--border); }
+  .tab-btn { flex: 1; padding: 12px 0; background: transparent; border: none; border-radius: 0; color: var(--text-dim); font-size: 13px; font-weight: 600; border-bottom: 2px solid transparent; }
+  .tab-btn.active { color: var(--text); border-bottom: 2px solid var(--blue); }
+
+  .tab-page { display: none; flex: 1; flex-direction: column; min-height: 0; }
+  .tab-page.active { display: flex; }
+
+  .controls { display: flex; gap: 8px; padding: 10px 16px; background: var(--panel); border-bottom: 1px solid var(--border); flex-wrap: wrap; align-items: center; }
+  select, button { background: #182033; color: var(--text); border: 1px solid var(--border); border-radius: 6px; padding: 8px 10px; font-size: 13px; }
+  button { cursor: pointer; }
+  .zoom-controls { display: flex; gap: 4px; margin-left: auto; }
+  .zoom-controls button { width: 36px; padding: 8px 0; font-size: 16px; font-weight: 700; background: var(--blue-dim); }
+  .zoom-controls button:active { background: var(--blue); }
+
+  #legend { display: flex; gap: 14px; padding: 6px 16px; background: var(--panel); font-size: 11px; border-bottom: 1px solid var(--border); }
+  .legend-item { display: flex; align-items: center; gap: 5px; }
+  .swatch { width: 14px; height: 3px; border-radius: 2px; }
+
+  #chart-wrap { flex: 1; position: relative; padding: 8px; overflow: hidden; display: flex; flex-direction: column; min-height: 0; }
+  #price-badge { position: absolute; top: 20px; left: 24px; font-size: 22px; font-weight: 700; z-index: 3; }
+  #price-badge.up { color: var(--green); }
+  #price-badge.down { color: var(--red); }
+  #chart-area { flex: 1; position: relative; background: var(--panel); border-radius: 8px; border: 1px solid var(--border); overflow: hidden; }
+  #scroll-container { width: 100%; height: 100%; overflow-x: auto; overflow-y: hidden; -webkit-overflow-scrolling: touch; touch-action: pan-x; }
+  #chart { display: block; height: 100%; }
+  #axis-overlay { position: absolute; top: 0; right: 0; height: 100%; width: 64px; z-index: 2; touch-action: none; }
+  #axis-caption { position: absolute; top: 4px; right: 4px; font-size: 9px; color: var(--text-dim); z-index: 3; pointer-events: none; }
+  #axis-mode-btn { position: absolute; bottom: 4px; right: 4px; font-size: 9px; padding: 2px 6px; z-index: 3; background: #182033; border: 1px solid var(--border); border-radius: 4px; color: var(--text-dim); }
+  #jump-latest-btn { display: none; position: absolute; bottom: 36px; right: 74px; z-index: 4; font-size: 12px; padding: 6px 10px; background: var(--blue-dim); }
+  #jump-latest-btn.show { display: block; }
+
+  #trade-panel { display: flex; gap: 10px; padding: 12px 16px; background: var(--panel); border-top: 1px solid var(--border); }
+  .trade-btn { flex: 1; padding: 16px; font-size: 16px; font-weight: 700; border-radius: 10px; border: none; letter-spacing: 0.5px; }
+  .trade-btn.rise { background: var(--green); color: #04120f; }
+  .trade-btn.fall { background: var(--red); color: #2a0505; }
+  .trade-btn:active { opacity: 0.8; }
+
+  #log { font-size: 11px; color: var(--text-dim); padding: 6px 16px; background: var(--panel); border-top: 1px solid var(--border); max-height: 50px; overflow-y: auto; font-family: monospace; }
+
+  #alert-bar { display: none; align-items: center; gap: 10px; padding: 10px 16px; background: #2a0f14; border-bottom: 2px solid var(--red); font-size: 13px; }
+  #alert-bar.show { display: flex; }
+  #alert-bar .dismiss { margin-left: auto; background: var(--blue-dim); }
+
+  .page-content { padding: 16px; overflow-y: auto; flex: 1; }
+  .page-content h3 { font-size: 14px; margin-bottom: 10px; color: var(--text-dim); }
+  #cross-list-full { font-size: 12px; font-family: monospace; }
+  .cross-entry { padding: 6px 0; border-bottom: 1px solid var(--border); }
+  .cross-entry.bull { color: var(--green); }
+  .cross-entry.bear { color: var(--red); }
+
+  .settings-section { margin-bottom: 24px; }
+  .settings-section h4 { font-size: 12px; color: var(--text-dim); margin-bottom: 10px; }
+  .sound-row { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+  #monitor-status { font-size: 11px; color: var(--text-dim); margin-top: 8px; }
+  #logoutBtn { background: var(--red); color: #2a0505; font-weight: 700; }
+</style>
+</head>
+<body>
+
+<header>
+  <div class="logo"><span id="status-dot"></span>Blue<span>FX</span></div>
+  <div id="account-block">
+    <div class="account-toggle">
+      <button id="demoAccBtn" class="active">Demo</button>
+      <button id="realAccBtn">Real</button>
+    </div>
+    <span id="account-balance">Not connected</span>
+  </div>
+</header>
+
+<div id="tab-bar">
+  <button class="tab-btn active" data-tab="chart">Chart</button>
+  <button class="tab-btn" data-tab="signals">Signals</button>
+  <button class="tab-btn" data-tab="settings">Settings</button>
+</div>
+
+<!-- ===================== CHART TAB ===================== -->
+<div class="tab-page active" id="tab-chart">
+  <div class="controls">
+    <select id="symbol"></select>
+    <select id="granularity">
+      <option value="60">1m</option>
+      <option value="300">5m</option>
+      <option value="900">15m</option>
+      <option value="3600" selected>1h</option>
+      <option value="86400">1D</option>
+    </select>
+    <div class="zoom-controls">
+      <button id="zoomOutBtn">−</button>
+      <button id="zoomInBtn">+</button>
+    </div>
+  </div>
+
+  <div id="legend">
+    <div class="legend-item"><div class="swatch" style="background:var(--ema20)"></div>EMA 20</div>
+    <div class="legend-item"><div class="swatch" style="background:var(--ema50)"></div>EMA 50</div>
+  </div>
+
+  <div id="alert-bar">
+    <span id="alert-text"></span>
+    <button class="dismiss" id="dismissAlertBtn">Dismiss</button>
+  </div>
+
+  <div id="chart-wrap">
+    <div id="price-badge"></div>
+    <div id="chart-area">
+      <div id="scroll-container">
+        <canvas id="chart"></canvas>
+      </div>
+      <canvas id="axis-overlay"></canvas>
+      <div id="axis-caption">Price scale</div>
+      <button id="axis-mode-btn">AUTO</button>
+      <button id="jump-latest-btn">Jump to latest ▶</button>
+    </div>
+  </div>
+
+  <div id="trade-panel">
+    <button class="trade-btn rise" id="riseBtn">▲ Rise</button>
+    <button class="trade-btn fall" id="fallBtn">▼ Fall</button>
+  </div>
+
+  <div id="log"></div>
+</div>
+
+<!-- ===================== SIGNALS TAB ===================== -->
+<div class="tab-page" id="tab-signals">
+  <div class="page-content">
+    <h3>EMA 20/50 Cross Monitor — all Volatility Indices</h3>
+    <div id="cross-list-full"><span style="color:var(--text-dim)">No crossovers yet.</span></div>
+  </div>
+</div>
+
+<!-- ===================== SETTINGS TAB ===================== -->
+<div class="tab-page" id="tab-settings">
+  <div class="page-content">
+    <div class="settings-section">
+      <h4>Alert Sound</h4>
+      <div class="sound-row">
+        <button id="enableSoundBtn">Enable Sound</button>
+        <select id="ringtoneSelect">
+          <option value="beep">Beep</option>
+          <option value="siren">Siren</option>
+          <option value="chime">Chime</option>
+          <option value="pulse">Pulse</option>
+        </select>
+        <button id="testRingBtn">Test Ring</button>
+      </div>
+      <div id="monitor-status">Sound: locked (tap "Enable Sound")</div>
+    </div>
+
+    <div class="settings-section">
+      <h4>Account</h4>
+      <button id="logoutBtn">Log out</button>
+    </div>
+  </div>
+</div>
+
+<script src="app.js?v=6"></script>
+</body>
+</html>
