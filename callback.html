@@ -42,7 +42,16 @@
         redirect_uri: window.location.origin + "/callback",
       }),
     });
-    const tokenData = await res.json();
+    const rawText = await res.text();
+    let tokenData;
+    try {
+      tokenData = JSON.parse(rawText);
+    } catch (parseErr) {
+      msgEl.textContent = "Server returned a non-JSON response (status " + res.status + "): " + rawText.slice(0, 200);
+      console.error("Raw response:", rawText);
+      document.getElementById("continueBtn").style.display = "block";
+      return;
+    }
     if (!res.ok || !tokenData.access_token) {
       msgEl.textContent = "Token exchange failed: " + JSON.stringify(tokenData);
       console.error("Token exchange failed:", tokenData);

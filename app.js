@@ -863,6 +863,7 @@ function loadStoredDerivAccounts() {
 function renderDerivAccounts() {
   if (derivAccounts.length === 0) return;
   connectDerivBtn.style.display = "none";
+  document.getElementById("account-block").style.display = "flex";
 
   const demo = derivAccounts.find(a => (a.account_type || "").toLowerCase() === "demo");
   const real = derivAccounts.find(a => (a.account_type || "").toLowerCase() !== "demo");
