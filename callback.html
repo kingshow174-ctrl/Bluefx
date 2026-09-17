@@ -8,7 +8,7 @@
 </style>
 </head>
 <body>
-<div id="msg">Connecting your Deriv account...</div>
+<div><div id="msg">Connecting your Deriv account...</div><div id="continueBtn" style="display:none; margin-top:16px;"><a href="/" style="color:#2f6bff;">Continue to Blue FX →</a></div></div>
 <script>
 (async function () {
   const params = new URLSearchParams(window.location.search);
@@ -18,8 +18,8 @@
   const msgEl = document.getElementById("msg");
 
   if (error) {
-    msgEl.textContent = "Login was cancelled or denied. Redirecting back...";
-    setTimeout(() => { window.location.href = "/"; }, 1500);
+    msgEl.textContent = "Login was cancelled or denied: " + (params.get("error_description") || error);
+    document.getElementById("continueBtn").style.display = "block";
     return;
   }
 
@@ -27,8 +27,8 @@
   const codeVerifier = sessionStorage.getItem("bluefx_code_verifier");
 
   if (!code || !state || state !== storedState || !codeVerifier) {
-    msgEl.textContent = "Login response didn't match — possible expired session. Redirecting back...";
-    setTimeout(() => { window.location.href = "/"; }, 1500);
+    msgEl.textContent = "Login response didn't match — possible expired session. (code=" + !!code + ", state match=" + (state === storedState) + ", verifier=" + !!codeVerifier + ")";
+    document.getElementById("continueBtn").style.display = "block";
     return;
   }
 
@@ -46,6 +46,7 @@
     if (!res.ok || !tokenData.access_token) {
       msgEl.textContent = "Token exchange failed: " + JSON.stringify(tokenData);
       console.error("Token exchange failed:", tokenData);
+      document.getElementById("continueBtn").style.display = "block";
       return;
     }
 
@@ -62,16 +63,18 @@
       const accounts = Array.isArray(acctData.data) ? acctData.data : [acctData.data];
       localStorage.setItem("bluefx_deriv_accounts", JSON.stringify(accounts));
       msgEl.textContent = "Connected! Redirecting...";
+      sessionStorage.removeItem("bluefx_oauth_state");
+      sessionStorage.removeItem("bluefx_code_verifier");
+      setTimeout(() => { window.location.href = "/"; }, 1000);
     } else {
-      msgEl.textContent = "Logged in, but couldn't list accounts — see console.";
+      msgEl.textContent = "Logged in, but couldn't list accounts: " + JSON.stringify(acctData);
+      console.error("Accounts fetch failed:", acctData);
+      document.getElementById("continueBtn").style.display = "block";
     }
   } catch (e) {
     msgEl.textContent = "Error during login: " + e.message;
     console.error(e);
-  } finally {
-    sessionStorage.removeItem("bluefx_oauth_state");
-    sessionStorage.removeItem("bluefx_code_verifier");
-    setTimeout(() => { window.location.href = "/"; }, 1200);
+    document.getElementById("continueBtn").style.display = "block";
   }
 })();
 </script>
