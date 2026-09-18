@@ -820,11 +820,30 @@ fireCrossoverAlert = function(symbol, bullish) {
 // yet (still on the public feed), so this just resets the UI.
 // =========================================================
 document.getElementById("logoutBtn").addEventListener("click", () => {
+  // Clear all stored session data
+  localStorage.removeItem("bluefx_access_token");
+  localStorage.removeItem("bluefx_deriv_accounts");
+
+  // Close the authenticated feed if it's open
+  if (typeof authWs !== "undefined" && authWs) {
+    try { authWs.close(); } catch (e) {}
+    authWs = null;
+  }
+
+  // Reset in-memory state
+  if (typeof derivAccessToken !== "undefined") derivAccessToken = null;
+  if (typeof derivAccounts !== "undefined") derivAccounts = [];
+  if (typeof selectedDerivAccount !== "undefined") selectedDerivAccount = null;
   selectedAccountType = "demo";
+
+  // Reset the UI back to logged-out state
   demoAccBtn.classList.add("active");
   realAccBtn.classList.remove("active");
-  accountBalance.textContent = "Not connected";
-  log("Logged out (placeholder — no real session was active).");
+  accountBalance.textContent = "";
+  document.getElementById("account-block").style.display = "none";
+  connectDerivBtn.style.display = "";
+
+  log("Logged out. Session cleared.");
 });
 
 // =========================================================
